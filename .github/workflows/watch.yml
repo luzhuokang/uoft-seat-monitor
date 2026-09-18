@@ -1,0 +1,61 @@
+name: Watch WGS397
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "2/5 * * * *"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-seat:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check WGS397 seat
+        id: check
+        run: python check_seat.py
+
+      - name: Create seat alert
+        if: steps.check.outputs.open == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create seat-alert \
+            --color D73A4A \
+            --description "UofT course seat alert" 2>/dev/null || true
+
+          COUNT=$(gh issue list \
+            --label seat-alert \
+            --state open \
+            --json number \
+            --jq 'length')
+
+          if [ "$COUNT" = "0" ]; then
+            gh issue create \
+              --title "🚨 WGS397H1F 有空位了" \
+              --body-file seat_message.txt \
+              --label seat-alert
+          fi
+
+      - name: Reset alert when full
+        if: steps.check.outputs.open != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NUMBERS=$(gh issue list \
+            --label seat-alert \
+            --state open \
+            --json number \
+            --jq '.[].number' 2>/dev/null || true)
+
+          for NUMBER in $NUMBERS; do
+            gh issue close "$NUMBER" \
+              --comment "Course is full again. Monitoring continues."
+          done
